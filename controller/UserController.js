@@ -1,15 +1,20 @@
 const conn = require('../mariadb');  // db 모듈
 const {StatusCodes} = require('http-status-codes') // status 코드
 const jwt = require('jsonwebtoken'); // jwt 모듈
+const crypto = require('crypto'); // crypto 모듈 :암호화
 const dotenv = require('dotenv');  //dotenv 모듈
 dotenv.config();
 
 const join = (req, res) => {
     const {email, password} = req.body;
 
-    let sql = 'INSERT INTO users (email, password) VALUES (?, ?)'
-    let values = [email, password]
+    let sql = 'INSERT INTO users (email, password, salt) VALUES (?, ?, ?)';
 
+    // 암호화된 비밀번호와 salt 값을 같이 DB에 저장
+    const salt = crypto.randomBytes(10).toString('base64');
+    const hashPassword = crypto.pbkdf2Sync(password, salt, 10000, 10, 'sha512').toString('base64');
+
+    let values = [email, hashPassword, salt];
     conn.query(sql, values,
         (err, results) => {
             if(err) {
@@ -34,7 +39,12 @@ const login = (req, res) => {
             }
 
             const loginUser = results[0];
-            if(loginUser && loginUser.password == password) {
+
+            // salt값 꺼내서 비밀번호 암호화 해보고 => 
+            const hashPassword = crypto.pbkdf2Sync(password, loginUser.salt, 10000, 10, 'sha512').toString('base64');
+
+            // db 비밀번호와 비교
+            if(loginUser && loginUser.password == hashPassword) {
                 // 토큰 발행
                 const token = jwt.sign({
                     email : loginUser.email
@@ -86,8 +96,13 @@ const passwordResetRequest = (req, res) => {
 const passwordReset = (req, res) => {
     const {email, password} = req.body;
 
-    let sql = 'UPDATE users SET password=? WHERE email=?';
-    let values = [password, email];
+    let sql = 'UPDATE users SET password=?, salt=? WHERE email=?';
+
+    // 암호화된 비밀번호와 salt 값을 같이 DB에 저장
+    const salt = crypto.randomBytes(10).toString('base64');
+    const hashPassword = crypto.pbkdf2Sync(password, salt, 10000, 10, 'sha512').toString('base64');
+
+    let values = [hashPassword, salt, email];
     conn.query(sql, values,
         (err, results) => {
             if(err) {
